@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS stripe_test_sessions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), amount INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending', intent TEXT, refunded INTEGER NOT NULL DEFAULT 0);
