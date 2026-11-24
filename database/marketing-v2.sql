@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS marketing_events_v2 (id TEXT PRIMARY KEY, day TEXT NOT NULL DEFAULT (date('now')), browser TEXT NOT NULL, page TEXT NOT NULL, source TEXT NOT NULL, campaign TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('view','submission','booking_click','form_start','booking_ready')));
+INSERT OR IGNORE INTO marketing_events_v2 SELECT * FROM marketing_events;
+CREATE INDEX IF NOT EXISTS marketing_v2_day ON marketing_events_v2(day);
