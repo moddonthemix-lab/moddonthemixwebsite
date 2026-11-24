@@ -23,8 +23,9 @@ export async function onRequestPost({request,env}){
  await db.batch([db.prepare('INSERT INTO customers(id,email,artist_name,instagram) VALUES(?,?,?,?) ON CONFLICT(email) DO NOTHING').bind(crypto.randomUUID(),email,artist,ig),db.prepare('INSERT INTO projects(id,customer_id,service,notes,reference_url) SELECT ?,id,?,?,? FROM customers WHERE email=?').bind(id,d.service,String(d.notes||'').slice(0,4000),String(d.reference||'').slice(0,1000),email),db.prepare("INSERT INTO upload_authorizations(token_hash,project_id,expires_at) VALUES(?,?,datetime('now','+2 days'))").bind(await hash(secret),id)]);
  return out({project:id,token:secret});
  }
- if(!/^Bearer [a-f0-9]{64}$/.test(token))return out({error:'Authorization required'},401);
- const auth=await db.prepare("SELECT a.project_id FROM upload_authorizations a JOIN projects p ON p.id=a.project_id WHERE token_hash=? AND revoked_at IS NULL AND expires_at>datetime('now') AND p.status IN ('pending','uploading')").bind(await hash(token.slice(7))).first();
+ const admin=env.ADMIN_TOKEN?.length>=32&&await hash(token)===await hash('Bearer '+env.ADMIN_TOKEN);
+ if(!admin&&!/^Bearer [a-f0-9]{64}$/.test(token))return out({error:'Authorization required'},401);
+ const auth=admin?await db.prepare("SELECT id AS project_id FROM projects WHERE id=? AND status IN ('submitted','in_progress','revision','delivered')").bind(url.searchParams.get('project')).first():await db.prepare("SELECT a.project_id FROM upload_authorizations a JOIN projects p ON p.id=a.project_id WHERE token_hash=? AND revoked_at IS NULL AND expires_at>datetime('now') AND p.status IN ('pending','uploading')").bind(await hash(token.slice(7))).first();
  if(!auth)return out({error:'Invalid or expired upload authorization'},401);
  const project=auth.project_id;
  if(action==='start'){
@@ -32,20 +33,21 @@ export async function onRequestPost({request,env}){
  if(!Number.isSafeInteger(size)||size<1||size>MAX||name.length>240||! /\.(wav|aiff?|zip|mp3|flac)$/i.test(name))return out({error:'Invalid file'},400);
  const triggers=await db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name IN ('file_reservation_limit','file_reservation_update_limit')").first();
  if(triggers.n!==2)return out({error:'Storage protection not installed'},503);
- const id=crypto.randomUUID(),key='projects/'+project+'/'+id;
+ const id=crypto.randomUUID(),key='projects/'+project+'/'+(admin?'engineer/':'')+id;
  await db.prepare("INSERT INTO project_files(id,project_id,object_key,original_name,size_bytes,expires_at) VALUES(?,?,?,?,?,datetime('now','+30 days'))").bind(id,project,key,name,size).run();
- const upload=await bucket.createMultipartUpload(key);
+ let upload;try{upload=await bucket.createMultipartUpload(key)}catch(e){await db.prepare("UPDATE project_files SET status='failed' WHERE id=?").bind(id).run();throw e}
  await db.prepare("UPDATE project_files SET multipart_id=?,status='uploading' WHERE id=?").bind(upload.uploadId,id).run();
- await db.prepare("UPDATE projects SET status='uploading' WHERE id=? AND status='pending'").bind(project).run();
+ if(!admin)await db.prepare("UPDATE projects SET status='uploading' WHERE id=? AND status='pending'").bind(project).run();
  return out({id,partSize:PART});
  }
- if(action==='submit'){
+ if(action==='submit'&&!admin){
  const result=await db.prepare("UPDATE projects SET status='submitted',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='uploading' AND EXISTS(SELECT 1 FROM project_files WHERE project_id=? AND status='uploaded') AND NOT EXISTS(SELECT 1 FROM project_files WHERE project_id=? AND status IN ('reserved','uploading'))").bind(project,project,project).run();
  return result.meta.changes?out({project}):out({error:'Uploads incomplete'},409);
  }
  const id=url.searchParams.get('id'),f=await db.prepare("SELECT * FROM project_files WHERE id=? AND project_id=? AND status='uploading'").bind(id,project).first();
- if(!f)return out({error:'File not found'},404);
+ if(!f||(!admin&&f.object_key.includes('/engineer/'))||(admin&&!f.object_key.includes('/engineer/')))return out({error:'File not found'},404);
  const upload=bucket.resumeMultipartUpload(f.object_key,f.multipart_id),count=Math.ceil(f.size_bytes/PART);
+ if(action==='abort'&&admin){await upload.abort();await db.prepare("UPDATE project_files SET status='failed' WHERE id=? AND status='uploading'").bind(id).run();return out({ok:true})}
  if(action==='part'){
  const n=Number(url.searchParams.get('n')),expected=Math.min(PART,f.size_bytes-(n-1)*PART);
  if(!Number.isInteger(n)||n<1||n>count||Number(request.headers.get('Content-Length'))!==expected)return out({error:'Invalid part size'},400);
