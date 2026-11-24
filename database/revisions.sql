@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS revision_settings (project_id TEXT PRIMARY KEY REFERENCES projects(id), allowance INTEGER NOT NULL CHECK(allowance BETWEEN 0 AND 100));
