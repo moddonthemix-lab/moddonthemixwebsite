@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS stripe_checkout_attempts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), live INTEGER NOT NULL CHECK(live IN (0,1)), amount INTEGER NOT NULL CHECK(amount>=50), session_id TEXT UNIQUE, intent TEXT UNIQUE, state TEXT NOT NULL DEFAULT 'pending', refunded INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX IF NOT EXISTS stripe_one_pending ON stripe_checkout_attempts(project_id,live) WHERE state='pending';
