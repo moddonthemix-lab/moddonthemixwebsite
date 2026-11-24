@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS review_links (token_hash TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), expires_at TEXT NOT NULL, revoked_at TEXT);
+CREATE TABLE IF NOT EXISTS review_versions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), version_number INTEGER NOT NULL, original_file_id TEXT REFERENCES project_files(id), mixed_file_id TEXT NOT NULL REFERENCES project_files(id), final_file_id TEXT REFERENCES project_files(id), released INTEGER NOT NULL DEFAULT 0, UNIQUE(project_id,version_number));
+CREATE TABLE IF NOT EXISTS review_decisions (version_id TEXT PRIMARY KEY REFERENCES review_versions(id), decision TEXT NOT NULL CHECK(decision IN ('approved','revision')), notes TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
