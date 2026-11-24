@@ -6,16 +6,24 @@ export async function onRequestPost({request,env}){
  const db=env.DB,bucket=env.PROJECTS_BUCKET;
  if(!db||!bucket)return out({error:'Not configured'},503);
  const token=request.headers.get('Authorization')||'';
- if(!/^Bearer [a-f0-9]{64}$/.test(token))return out({error:'Authorization required'},401);
+ 
  const url=new URL(request.url),action=url.searchParams.get('action');
- if(action==='invite'){
+ if(action==='invite'||action==='guest'){
+ if(action==='guest'){
+ if(!env.TURNSTILE_SECRET_KEY)return out({error:'Verification not configured'},503);
+ }else{
  if(!env.ADMIN_TOKEN||env.ADMIN_TOKEN.length<32||await hash(token)!==await hash('Bearer '+env.ADMIN_TOKEN))return out({error:'Unauthorized'},401);
- const d=await request.json(),email=String(d.email||'').trim().toLowerCase(),artist=String(d.artist||'').trim(),ig=String(d.instagram||'').trim();
+ }
+ const d=await request.json();
+ if(action==='guest'){const verify=await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify',{method:'POST',body:new URLSearchParams({secret:env.TURNSTILE_SECRET_KEY,response:String(d.challenge||''),remoteip:request.headers.get('CF-Connecting-IP')||''})});const v=await verify.json();if(!v.success||v.hostname!=='moddonthemix.com'||v.action!=='project_upload')return out({error:'Verification failed'},403);}
+ const email=String(d.email||'').trim().toLowerCase(),artist=String(d.artist||'').trim(),ig=String(d.instagram||'').trim();
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||!artist||artist.length>200||!/^@?[\w.]{1,30}$/.test(ig)||!['mixing','mastering','mix-master','custom'].includes(d.service))return out({error:'Invalid project details'},400);
  const id=crypto.randomUUID(),secret=Array.from(crypto.getRandomValues(new Uint8Array(32)),x=>x.toString(16).padStart(2,'0')).join('');
+ if(action==='guest'){const limits=await db.prepare("SELECT COUNT(*) AS n FROM projects WHERE created_at>datetime('now','-1 day') AND (customer_id IN (SELECT id FROM customers WHERE email=?) OR status IN ('pending','uploading'))").bind(email).first();if(limits.n>=10)return out({error:'Submission capacity reached; contact the engineer'},429);}
  await db.batch([db.prepare('INSERT INTO customers(id,email,artist_name,instagram) VALUES(?,?,?,?) ON CONFLICT(email) DO NOTHING').bind(crypto.randomUUID(),email,artist,ig),db.prepare('INSERT INTO projects(id,customer_id,service,notes,reference_url) SELECT ?,id,?,?,? FROM customers WHERE email=?').bind(id,d.service,String(d.notes||'').slice(0,4000),String(d.reference||'').slice(0,1000),email),db.prepare("INSERT INTO upload_authorizations(token_hash,project_id,expires_at) VALUES(?,?,datetime('now','+2 days'))").bind(await hash(secret),id)]);
  return out({project:id,token:secret});
  }
+ if(!/^Bearer [a-f0-9]{64}$/.test(token))return out({error:'Authorization required'},401);
  const auth=await db.prepare("SELECT a.project_id FROM upload_authorizations a JOIN projects p ON p.id=a.project_id WHERE token_hash=? AND revoked_at IS NULL AND expires_at>datetime('now') AND p.status IN ('pending','uploading')").bind(await hash(token.slice(7))).first();
  if(!auth)return out({error:'Invalid or expired upload authorization'},401);
  const project=auth.project_id;
