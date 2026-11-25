@@ -8,7 +8,7 @@ export async function onRequest({request,env}){
  if(action==='upload'||action==='download'){
  if(!env.PROJECTS_BUCKET)return out({error:'Storage unavailable'},503);
  const p=await env.DB.prepare('SELECT object_key,active FROM template_products WHERE id=?').bind(id).first();
- if(!p||id==='custom')return out({error:'Invalid downloadable product'},400);
+ if(!p||!['starter','essentials','elite'].includes(id))return out({error:'Invalid downloadable product'},400);
  if(action==='download'&&request.method==='GET'){
  if(!p.object_key||!p.object_key.startsWith('templates/'+id+'/'))return out({error:'No file'},404);
  const obj=await env.PROJECTS_BUCKET.get(p.object_key);if(!obj)return out({error:'File missing'},404);
@@ -25,9 +25,9 @@ export async function onRequest({request,env}){
  return out({ok:true});
  }
  if(request.method==='GET'){
- const products=await env.DB.prepare('SELECT id,title,price_cents,active,requirements,CASE WHEN object_key IS NULL THEN 0 ELSE 1 END AS has_file FROM template_products ORDER BY price_cents').all();
+ const products=await env.DB.prepare('SELECT id,title,price_cents,active,requirements,CASE WHEN object_key IS NULL THEN 0 ELSE 1 END AS has_file FROM template_products WHERE id IN (\'starter\',\'essentials\',\'elite\',\'custom\') ORDER BY price_cents').all();
  const orders=await env.DB.prepare('SELECT id,email,status,total_cents,created_at FROM template_orders ORDER BY created_at DESC LIMIT 100').all();
- return out({products:products.results,orders:orders.results});
+ return out({products:products.results.map(p=>({...p,title:({starter:'MODD Free',essentials:'MODD Essential'})[p.id]||p.title})),orders:orders.results});
  }
  if(request.method==='POST'){
  const d=await request.json();
