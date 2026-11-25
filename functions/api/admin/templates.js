@@ -5,7 +5,13 @@ export async function onRequest({request,env}){
  if(!env.DB)return out({error:'Database unavailable'},503);
  try{
  const u=new URL(request.url),action=u.searchParams.get('action'),id=u.searchParams.get('id');
- if(action==='upload'||action==='download'){
+ if(action==='publish-free'&&request.method==='POST'){
+const d=await request.json();if(typeof d.active!=='boolean')return out({error:'Invalid status'},400);
+const p=await env.DB.prepare("SELECT object_key,price_cents FROM template_products WHERE id='starter'").first();
+if(d.active&&(!p?.object_key?.startsWith('templates/starter/')||p.price_cents!==0||!await env.PROJECTS_BUCKET.head(p.object_key)))return out({error:'Upload the free ZIP first'},409);
+await env.DB.prepare("UPDATE template_products SET active=? WHERE id='starter'").bind(d.active?1:0).run();return out({ok:true});
+}
+if(action==='upload'||action==='download'){
  if(!env.PROJECTS_BUCKET)return out({error:'Storage unavailable'},503);
  const p=await env.DB.prepare('SELECT object_key,active FROM template_products WHERE id=?').bind(id).first();
  if(!p||!['starter','essentials','elite'].includes(id))return out({error:'Invalid downloadable product'},400);
@@ -31,7 +37,7 @@ export async function onRequest({request,env}){
  }
  if(request.method==='POST'){
  const d=await request.json();
- if(!['starter','essentials','signature','elite','custom'].includes(d.id)||!Number.isInteger(d.price_cents)||d.price_cents<0||d.price_cents>1000000||d.id==='starter'&&d.price_cents!==0||d.id!=='starter'&&d.price_cents===0||typeof d.requirements!=='string'||d.requirements.length>4000)return out({error:'Invalid product settings'},400);
+ if(!['starter','essentials','elite','custom'].includes(d.id)||!Number.isInteger(d.price_cents)||d.price_cents<0||d.price_cents>1000000||d.id==='starter'&&d.price_cents!==0||d.id!=='starter'&&d.price_cents===0||typeof d.requirements!=='string'||d.requirements.length>4000)return out({error:'Invalid product settings'},400);
  await env.DB.prepare('UPDATE template_products SET price_cents=?,requirements=?,active=0 WHERE id=?').bind(d.price_cents,d.requirements,d.id).run();
  return out({ok:true});
  }
