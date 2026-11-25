@@ -5,6 +5,15 @@ export async function onRequest({request,env}){
  const enc=new TextEncoder(),a=new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode(request.headers.get('Authorization')||''))),b=new Uint8Array(await crypto.subtle.digest('SHA-256',enc.encode('Bearer '+env.ADMIN_TOKEN)));let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];if(diff)return reply({error:'Unauthorized'},401);
  const db=env.DB,u=new URL(request.url),id=u.searchParams.get('id'),action=u.searchParams.get('action');
  try{
+ if(request.method==='GET'&&action==='export'){
+ const rows=await db.prepare("SELECT c.id,c.artist_name,c.email,c.instagram,c.created_at,COUNT(p.id) AS projects,GROUP_CONCAT(DISTINCT p.service) AS services,COALESCE(SUM((SELECT COALESCE(SUM(amount_cents),0) FROM payment_records WHERE project_id=p.id)),0) AS spending,(SELECT notes FROM projects WHERE customer_id=c.id ORDER BY created_at DESC,id DESC LIMIT 1) AS notes FROM customers c LEFT JOIN projects p ON p.customer_id=c.id GROUP BY c.id ORDER BY c.email").all();
+ const orders=await db.prepare("SELECT email,COUNT(*) AS orders,COALESCE(SUM(CASE WHEN status IN ('paid','fulfilled') THEN total_cents ELSE 0 END),0) AS spending FROM template_orders GROUP BY lower(email)").all();
+ const map=new Map();for(const x of rows.results){let phone='';try{phone=JSON.parse(x.notes||'{}').phone||''}catch{}map.set(x.email.toLowerCase(),[x.artist_name,x.email,phone,x.instagram,x.services||'',x.projects,(x.spending/100).toFixed(2),0,'0.00',x.created_at,'Not recorded'])}
+ for(const o of orders.results){const k=o.email.toLowerCase(),v=map.get(k)||['',o.email,'','','',0,'0.00',0,'0.00','','Not recorded'];v[7]=o.orders;v[8]=(o.spending/100).toFixed(2);map.set(k,v)}
+ const cell=v=>{let s=String(v??'');if(/^[\s\u0000-\u001f]*[=+\-@]/.test(s)||/^[\t\r\n]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"'};
+ const csv=[['Artist','Email','Latest project phone','Instagram','Services','Project count','Service net payments USD','Template order count','Template paid total USD','Customer since UTC','Marketing consent'],...map.values()].map(row=>row.map(cell).join(',')).join('\r\n');
+ return new Response('\uFEFF'+csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="modd-customers.csv"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+ }
  if(request.method==='GET'&&action==='summary'){
  const totals=await db.prepare("SELECT COALESCE(SUM(amount_cents),0) lifetime,COALESCE(SUM(CASE WHEN received_at>=date('now') THEN amount_cents ELSE 0 END),0) daily,COALESCE(SUM(CASE WHEN received_at>=date('now','-6 days') THEN amount_cents ELSE 0 END),0) weekly,COALESCE(SUM(CASE WHEN received_at>=date('now','start of month') THEN amount_cents ELSE 0 END),0) monthly FROM payment_records").first();
  const customers=await db.prepare("SELECT c.id,c.artist_name,c.email,c.instagram,COUNT(p.id) projects,COALESCE(SUM((SELECT COALESCE(SUM(amount_cents),0) FROM payment_records WHERE project_id=p.id)),0) spending FROM customers c LEFT JOIN projects p ON p.customer_id=c.id GROUP BY c.id ORDER BY spending DESC LIMIT 200").all();
