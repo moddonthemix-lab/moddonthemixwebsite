@@ -1,3 +1,3 @@
 export async function onRequestGet({env}){
-try{const r=await env.DB.prepare("SELECT id,title,price_cents,requirements FROM template_products ORDER BY price_cents").all();return Response.json({products:r.results,checkout_enabled:false},{headers:{'Cache-Control':'no-store'}})}catch{return Response.json({error:'Catalog unavailable'},{status:503})}
+try{const r=await env.DB.prepare("SELECT id,title,price_cents,requirements FROM template_products WHERE id IN ('starter','essentials','elite','custom') ORDER BY price_cents").all();return Response.json({products:r.results.map(p=>({...p,title:({starter:"MODD Free",essentials:"MODD Essential"})[p.id]||p.title})),checkout_enabled:false},{headers:{'Cache-Control':'no-store'}})}catch{return Response.json({error:'Catalog unavailable'},{status:503})}
 }
