@@ -1,0 +1,6 @@
+export async function onRequestGet({request,env}){
+const fail=()=>new Response('Download unavailable',{status:404,headers:{'Cache-Control':'no-store'}});
+try{const token=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');if(!/^[a-f0-9-]{72}$/.test(token))return fail();const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token))),x=>x.toString(16).padStart(2,'0')).join('');
+const p=await env.DB.prepare("SELECT p.object_key FROM template_download_grants g JOIN template_orders o ON o.id=g.order_id JOIN template_order_items i ON i.order_id=o.id AND i.product_id=g.product_id JOIN template_products p ON p.id=g.product_id WHERE g.token_hash=? AND g.revoked_at IS NULL AND g.expires_at>datetime('now') AND o.status='fulfilled' AND o.total_cents=0 AND i.price_cents=0 AND p.id='starter' AND p.active=1").bind(hash).first();
+if(!p?.object_key?.startsWith('templates/starter/'))return fail();const obj=await env.PROJECTS_BUCKET.get(p.object_key);if(!obj)return fail();return new Response(obj.body,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="modd-free.zip"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})
+}catch{return fail()}}
