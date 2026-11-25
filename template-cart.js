@@ -1,5 +1,5 @@
 (()=>{'use strict';
-const products=[['starter','MODD Starter',0],['essentials','MODD Essentials',3999],['signature','MODD Signature',9999],['elite','MODD Elite',14999],['custom','MODD Custom',24999]];
+const products=[['starter','MODD Free',0],['essentials','MODD Essential',3999],['elite','MODD Elite',14999],['custom','MODD Custom',24999]];
 const selected=new Set();try{const stored=JSON.parse(localStorage.getItem('modd_template_cart_v1')||'[]');if(Array.isArray(stored))for(const p of products)if(stored.includes(p[0]))selected.add(p[0])}catch{}
 const money=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(n/100);
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n};
