@@ -33,7 +33,9 @@ if(action==='upload'||action==='download'){
  if(request.method==='GET'){
  const products=await env.DB.prepare('SELECT id,title,price_cents,active,requirements,CASE WHEN object_key IS NULL THEN 0 ELSE 1 END AS has_file FROM template_products WHERE id IN (\'starter\',\'essentials\',\'elite\',\'custom\') ORDER BY price_cents').all();
  const orders=await env.DB.prepare('SELECT id,email,status,total_cents,created_at FROM template_orders ORDER BY created_at DESC LIMIT 100').all();
- return out({products:products.results.map(p=>({...p,title:({starter:'MODD Free',essentials:'MODD Essential'})[p.id]||p.title})),orders:orders.results});
+ const performance=await env.DB.prepare("SELECT COUNT(*) AS orders,COUNT(DISTINCT lower(email)) AS customers,COALESCE(SUM(CASE WHEN status='fulfilled' AND total_cents=0 THEN 1 ELSE 0 END),0) AS free_claims,COALESCE(SUM(CASE WHEN status IN ('paid','fulfilled') AND total_cents>0 THEN 1 ELSE 0 END),0) AS paid_orders,COALESCE(SUM(CASE WHEN status IN ('paid','fulfilled') THEN total_cents ELSE 0 END),0) AS paid_cents FROM template_orders").first();
+ const breakdown=await env.DB.prepare("SELECT i.product_id,COUNT(*) AS claims,COALESCE(SUM(i.price_cents),0) AS paid_cents FROM template_order_items i JOIN template_orders o ON o.id=i.order_id WHERE o.status IN ('paid','fulfilled') GROUP BY i.product_id").all();
+ return out({performance,breakdown:breakdown.results,products:products.results.map(p=>({...p,title:({starter:'MODD Free',essentials:'MODD Essential'})[p.id]||p.title})),orders:orders.results});
  }
  if(request.method==='POST'){
  const d=await request.json();
