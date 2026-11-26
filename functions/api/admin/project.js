@@ -5,6 +5,20 @@ export async function onRequest({request,env}){
  const db=env.DB,bucket=env.PROJECTS_BUCKET,u=new URL(request.url),id=u.searchParams.get('id'),action=u.searchParams.get('action');
  try{
  const p=await db.prepare('SELECT p.*,c.artist_name,c.email,c.instagram FROM projects p JOIN customers c ON c.id=p.customer_id WHERE p.id=?').bind(id).first();if(!p)return reply({error:'Project not found'},404);
+ if(request.method==='POST'&&action==='purge-project'){
+ const d=await request.json();if(d.confirm!==id)return reply({error:'Confirmation required'},400);
+ if(p.status!=='cancelled'||p.payment_status!=='unpaid')return reply({error:'Cancel the unpaid project first.'},409);
+ const guard="EXISTS(SELECT 1 FROM projects p WHERE p.id=? AND p.status='cancelled' AND p.payment_status='unpaid' AND NOT EXISTS(SELECT 1 FROM payment_records WHERE project_id=p.id) AND NOT EXISTS(SELECT 1 FROM stripe_checkout_attempts WHERE project_id=p.id AND (live=1 OR state='pending')) AND NOT EXISTS(SELECT 1 FROM project_files WHERE project_id=p.id AND status!='deleted'))";
+ if(!(await db.prepare('SELECT '+guard+' AS allowed').bind(id).first()).allowed)return reply({error:'Deletion blocked: remove all files first and resolve pending uploads or checkout attempts. Real payment records must be retained.'},409);
+ const statements=[];
+ const del=(table,where)=>statements.push(db.prepare('DELETE FROM '+table+' WHERE '+where+' AND '+guard).bind(id,id));
+ del('review_decisions','version_id IN (SELECT id FROM review_versions WHERE project_id=?)');
+ for(const t of ['review_versions','review_links','upload_authorizations','revision_settings','stripe_test_sessions','stripe_checkout_attempts','project_finances','project_files'])del(t,'project_id=?');
+ del('projects','id=?');
+ statements.push(db.prepare('DELETE FROM customers WHERE id=? AND NOT EXISTS(SELECT 1 FROM projects WHERE customer_id=customers.id)').bind(p.customer_id));
+ const results=await db.batch(statements);if(!results[results.length-2].meta.changes)return reply({error:'Project changed; deletion blocked'},409);
+ return reply({ok:true});
+ }
  if(request.method==='GET'&&action==='details'){const f=await db.prepare("SELECT id,original_name,size_bytes,status,created_at,CASE WHEN object_key LIKE '%/engineer/%' THEN 1 ELSE 0 END AS engineer_upload FROM project_files WHERE project_id=? ORDER BY created_at").bind(id).all();return reply({project:p,files:f.results})}
  if(request.method==='POST'&&action==='update'){const d=await request.json();if(!['pending','submitted','in_progress','revision','delivered','cancelled'].includes(d.status)||!['unpaid','paid','refunded'].includes(d.payment_status))return reply({error:'Invalid status'},400);if(p.status==='uploading')return reply({error:'Upload in progress'},409);await db.prepare("UPDATE projects SET status=?,payment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='uploading'").bind(d.status,d.payment_status,id).run();return reply({ok:true})}
  if(request.method==='POST'&&action==='bulk-delete'){
